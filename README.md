@@ -1,6 +1,6 @@
 # Last.fm Scrobbler para YouTube Music
 
-Sincroniza automaticamente o histórico de reproduções do **YouTube Music** com o **Last.fm**, rodando todos os dias às **23h (horário de São Paulo)** no **GitHub Actions**, sem depender de um computador ligado.
+Sincroniza automaticamente o histórico de reproduções do **YouTube Music** com o **Last.fm**, rodando **de hora em hora** no **GitHub Actions**, sem depender de um computador ligado.
 
 ## Sumário
 
@@ -50,7 +50,7 @@ O YouTube Music não envia scrobbles ao Last.fm. Este projeto lê o histórico d
 ### Fluxo de execução automática
 
 ```
-schedule (23h America/Sao_Paulo) ou execução manual
+schedule (minuto 17 de cada hora) ou execução manual
   └─ checkout → Python 3.14 → pip install -r requirements.txt
        └─ restaura o artifact "sync-state" mais recente (se existir)
             └─ python -m scrobbler --state-file state/state.json [--dry-run]
@@ -69,7 +69,7 @@ schedule (23h America/Sao_Paulo) ou execução manual
 | `scrobbler/state.py` | Leitura e gravação atômica do estado de sincronização |
 | `scrobbler/lastfm.py` | Envio em lotes, retentativas com backoff, scrobbles ignorados e geração da session key |
 | `scrobbler/sync.py` | Orquestração da sincronização e resumo da execução |
-| `.github/workflows/scrobble.yml` | Execução diária e manual no GitHub Actions |
+| `.github/workflows/scrobble.yml` | Execução de hora em hora e manual no GitHub Actions |
 | `tests/` | Testes automatizados (todas as APIs externas simuladas) |
 
 ## Pré-requisitos
@@ -228,7 +228,15 @@ Enquanto a autenticação estiver quebrada, o estado não é alterado; as reprod
 
 ## GitHub Actions
 
-O workflow **Scrobble YouTube Music** (`.github/workflows/scrobble.yml`) roda diariamente às **23:00 de America/Sao_Paulo** (campo `timezone` do `schedule`) e também pode ser disparado manualmente.
+O workflow **Scrobble YouTube Music** (`.github/workflows/scrobble.yml`) roda **de hora em hora, no minuto 17** (`cron: "17 * * * *"`, com `timezone: America/Sao_Paulo`), e também pode ser disparado manualmente.
+
+Por que de hora em hora: o histórico do YouTube Music guarda cada música uma única vez (ver [Controle de duplicações](#controle-de-duplicações)), então repetições só são detectadas entre uma sincronização e outra. Execuções frequentes capturam mais repetições e deixam os horários estimados mais próximos dos reais. Por que o minuto 17: a documentação do GitHub informa que o início de cada hora é o horário de maior carga, quando agendamentos atrasam ou podem ser descartados.
+
+Limites considerados:
+
+- **GitHub Actions:** o intervalo mínimo de agendamento é de 5 minutos. Cada execução leva cerca de 1 minuto; em repositório público os minutos dos runners padrão são gratuitos, e em repositório privado o consumo (~720 min/mês) cabe na franquia gratuita de 2.000 min/mês, desde que não haja outros workflows grandes.
+- **Last.fm:** os termos não fixam um número de requisições, apenas proíbem uso abusivo; cada execução faz 1 validação de sessão e no máximo alguns envios.
+- **YouTube Music:** a API não é oficial e não tem limite documentado; cada execução faz uma única leitura do histórico.
 
 ### Criar os secrets
 
@@ -267,7 +275,7 @@ O upload de artifacts usa o token de runtime do próprio Actions e não precisa 
 2. A opção **Dry-run** vem **marcada** por padrão: valida credenciais e mostra o que seria enviado, sem enviar e sem salvar estado.
 3. Para sincronizar de verdade, desmarque **Dry-run** e clique em **Run workflow**.
 
-Execuções reais manuais são seguras: usam e atualizam o mesmo estado do agendamento, e a execução das 23h enviará apenas o que for tocado depois.
+Execuções reais manuais são seguras: usam e atualizam o mesmo estado do agendamento, e a próxima execução agendada enviará apenas o que for tocado depois.
 
 ### Consultar logs e identificar falhas
 
@@ -396,7 +404,7 @@ Se o estado for perdido (sem execuções por mais de 30 dias ou artifacts apagad
 
 - **Sem horários reais:** todos os horários enviados são estimados (ver [Horários estimados](#horários-estimados)).
 - **Histórico limitado:** o `get_history()` retorna cerca de 200 itens, sem paginação. Mais de ~200 músicas diferentes entre duas execuções faz as mais antigas se perderem.
-- **Repetições:** uma música tocada várias vezes entre duas execuções aparece uma única vez no histórico e gera **um** scrobble. Tocar de novo a(s) música(s) que estavam no topo do histórico na última sincronização, na mesma ordem, não altera o histórico e não é detectável.
+- **Repetições:** uma música tocada várias vezes entre duas execuções (na prática, dentro da mesma hora) aparece uma única vez no histórico e gera **um** scrobble. Repetições em horas diferentes, com outras músicas no meio, são detectadas. Tocar de novo a(s) música(s) que estavam no topo do histórico na última sincronização, na mesma ordem, não altera o histórico e não é detectável.
 - **Tempo ouvido:** o Last.fm pede scrobble apenas quando metade da faixa (ou 4 minutos) foi ouvida. O YouTube Music não informa quanto foi ouvido, então músicas puladas que entraram no histórico também são enviadas.
 - **Seções desconhecidas:** se o YouTube Music mudar os nomes das seções, a data de cada música deixa de ser conhecida e os horários passam a ser estimados apenas entre a última sincronização e o momento da execução.
 - **Atrasos do GitHub Actions:** agendamentos podem atrasar ou ser descartados; repositórios públicos sem atividade por 60 dias têm o agendamento desativado.
@@ -417,7 +425,7 @@ Se o estado for perdido (sem execuções por mais de 30 dias ou artifacts apagad
 | `YouTube Music recusou a autenticação` ou `Resposta inesperada do YouTube Music` | Cookies expirados, logout ou mudança no YouTube Music | Gere um novo `browser.json`; se persistir, atualize o `ytmusicapi` |
 | `CERTIFICATE_VERIFY_FAILED` local | Inspeção HTTPS por antivírus/proxy | O projeto já usa `truststore`; confirme que o certificado do antivírus/proxy está instalado no Windows |
 | `0 músicas encontradas no histórico` | Histórico pausado ou conta diferente | Verifique o histórico em <https://music.youtube.com/history> com a mesma conta |
-| Workflow não executa às 23h | Agendamento desativado, Actions desabilitado ou atraso do GitHub | Veja [Verificar se o agendamento está habilitado](#verificar-se-o-agendamento-está-habilitado); atrasos são recuperados na execução seguinte |
+| Workflow não executa de hora em hora | Agendamento desativado, Actions desabilitado ou atraso do GitHub | Veja [Verificar se o agendamento está habilitado](#verificar-se-o-agendamento-está-habilitado); atrasos são recuperados na execução seguinte |
 | `Last.fm ignorou (horário muito antigo)` | Pendências antigas demais | Nada a fazer; o Last.fm não aceita scrobbles antigos |
 | `Last.fm ignorou (artista/faixa filtrado)` | Filtro de spam do Last.fm | Metadados do YouTube Music rejeitados pelo Last.fm; não há correção automática |
 | `Envio interrompido; N scrobbles ficam pendentes` | Last.fm indisponível | Serão reenviados na próxima execução; rode manualmente se quiser antecipar |
