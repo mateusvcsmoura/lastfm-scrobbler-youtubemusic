@@ -2,7 +2,7 @@ name: Scrobble YouTube Music
 
 on:
   schedule:
-    - cron: "0 23 * * *"
+    - cron: "17 * * * *"
       timezone: "America/Sao_Paulo"
   workflow_dispatch:
     inputs:
