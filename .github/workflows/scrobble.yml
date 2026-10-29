@@ -1,0 +1,76 @@
+name: Scrobble YouTube Music
+
+on:
+  schedule:
+    - cron: "0 23 * * *"
+      timezone: "America/Sao_Paulo"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry-run: simular sem enviar scrobbles nem salvar estado"
+        type: boolean
+        default: true
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: scrobble
+  cancel-in-progress: false
+
+jobs:
+  scrobble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Configurar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Instalar dependências
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Restaurar estado anterior
+        id: restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p state
+          artifact_id=$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=sync-state&per_page=100" \
+            --jq '.artifacts[] | select(.expired | not) | [.created_at, .id] | @tsv' \
+            | sort | tail -n 1 | cut -f 2)
+          if [ -z "${artifact_id}" ]; then
+            echo "Nenhum estado anterior encontrado; esta execução será tratada como a primeira."
+            exit 0
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > state.zip
+          unzip -o -q state.zip -d state
+          rm state.zip
+          echo "Estado restaurado do artifact ${artifact_id}."
+
+      - name: Sincronizar
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          LASTFM_API_SECRET: ${{ secrets.LASTFM_API_SECRET }}
+          LASTFM_SESSION_KEY: ${{ secrets.LASTFM_SESSION_KEY }}
+          BROWSER_JSON: ${{ secrets.BROWSER_JSON }}
+          DRY_RUN_FLAG: ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: python -m scrobbler --state-file state/state.json $DRY_RUN_FLAG
+
+      - name: Salvar estado
+        if: always() && steps.restore.outcome == 'success' && !inputs.dry_run
+        uses: actions/upload-artifact@v7
+        with:
+          name: sync-state
+          path: state/state.json
+          if-no-files-found: ignore
+          retention-days: 30
