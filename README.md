@@ -179,30 +179,33 @@ A linha `Last.fm autenticado como <usuário>` confirma que API key, secret e ses
 A autenticação usa os headers de uma sessão logada do navegador (`browser.json`), suportada pelo `ytmusicapi`:
 
 - Funciona igualmente no seu computador e no GitHub Actions, com um único secret.
-- Segundo a documentação do `ytmusicapi`, as credenciais duram **cerca de 2 anos**, desde que você **não faça logout** dessa sessão no navegador.
+- Segundo a documentação do `ytmusicapi`, as credenciais duram **cerca de 2 anos**, desde que você **não faça logout** dessa sessão no navegador. Na prática há uma segunda condição: o YouTube **rotaciona os cookies enquanto houver uma aba do YouTube aberta** com essa sessão, e os cookies exportados antes da rotação deixam de valer (orientação documentada pelo [yt-dlp](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies)). Neste projeto, um `browser.json` exportado com a janela anônima ainda aberta parou de funcionar em menos de um dia. Por isso a sessão exportada nunca pode voltar a ser aberta no navegador.
 - A alternativa OAuth exige um projeto no Google Cloud com um cliente OAuth próprio; enquanto o app do Google Cloud estiver em modo *Testing*, o refresh token expira em 7 dias, o que inviabiliza a execução autônoma.
 
 O conteúdo é validado antes do uso: precisa ser um objeto JSON com o cookie `__Secure-3PAPISID` e o header `authorization` (`SAPISIDHASH ...`). Um arquivo vazio ou `{}` é rejeitado com erro claro; nunca é tratado como autenticação válida.
 
 ### Gerar o `browser.json`
 
-Recomendação: use uma **janela anônima/privada**, para que a sessão não seja encerrada por um logout acidental no navegador do dia a dia.
+Use uma **janela anônima/privada** criada só para isso, para que a sessão exportada nunca mais seja aberta (e rotacionada) pelo navegador.
 
-1. Abra <https://music.youtube.com> e faça login.
-2. Abra as ferramentas de desenvolvedor (**F12**) → aba **Network/Rede**.
-3. Na página, clique em **Biblioteca** (ou role a página inicial) e filtre as requisições por `browse`.
-4. Selecione uma requisição **POST** para `browse?...` com status **200**.
+1. Feche outras janelas anônimas. Abra uma **nova janela anônima** (Firefox: Ctrl+Shift+P; Chrome/Edge: Ctrl+Shift+N), com **uma única aba**.
+2. Acesse <https://music.youtube.com> e faça login.
+3. Abra as ferramentas de desenvolvedor (**F12**) → aba **Network/Rede** e filtre por `browse`.
+4. Clique em **Biblioteca** e selecione uma requisição **POST** para `browse?...` com status **200**.
 5. Copie os headers da requisição:
    - **Firefox:** botão direito na requisição → *Copiar* → *Copiar cabeçalhos da requisição*.
    - **Chrome/Edge:** em *Headers → Request Headers*, copie tudo a partir de `accept: */*` até o fim da seção.
-6. No terminal, dentro do projeto e com o ambiente virtual ativo:
+6. **Imediatamente** feche a janela anônima inteira, **sem fazer logout** (o conteúdo copiado continua na área de transferência). Não abra o YouTube nessa sessão de novo.
+7. No terminal, dentro do projeto e com o ambiente virtual ativo:
 
    ```powershell
    ytmusicapi browser
    ```
 
-7. Cole os headers e finalize com **Enter**, **Ctrl+Z**, **Enter** (Windows). O arquivo `browser.json` será criado na pasta atual.
-8. Feche a janela anônima **sem fazer logout**.
+8. Cole os headers e finalize com **Enter**, **Ctrl+Z**, **Enter** (Windows). O arquivo `browser.json` será criado na pasta atual.
+9. Valide com `python -m scrobbler --dry-run`.
+
+Não use cookies de uma sessão que você continua usando no navegador do dia a dia: o navegador vai rotacioná-los e o `browser.json` deixará de valer.
 
 O `browser.json` contém cookies da sua conta Google. Ele está no `.gitignore`; nunca o envie ao GitHub.
 
@@ -218,7 +221,7 @@ No GitHub Actions o JSON é lido diretamente da variável de ambiente; nenhum ar
 
 ### Renovar quando expirar
 
-Sinais de expiração: erros como `YouTube Music recusou a autenticação` ou `Resposta inesperada do YouTube Music ao ler o histórico`.
+Sinais de expiração: erros como `YouTube Music não reconheceu a sessão do browser.json` (o YouTube responde "Sign in to view your history") ou `Resposta inesperada do YouTube Music ao ler o histórico`.
 
 1. Gere um novo `browser.json` seguindo os passos acima.
 2. Atualize o arquivo local e o secret `BROWSER_JSON` no GitHub.
@@ -408,7 +411,7 @@ Se o estado for perdido (sem execuções por mais de 30 dias ou artifacts apagad
 - **Tempo ouvido:** o Last.fm pede scrobble apenas quando metade da faixa (ou 4 minutos) foi ouvida. O YouTube Music não informa quanto foi ouvido, então músicas puladas que entraram no histórico também são enviadas.
 - **Seções desconhecidas:** se o YouTube Music mudar os nomes das seções, a data de cada música deixa de ser conhecida e os horários passam a ser estimados apenas entre a última sincronização e o momento da execução.
 - **Atrasos do GitHub Actions:** agendamentos podem atrasar ou ser descartados; repositórios públicos sem atividade por 60 dias têm o agendamento desativado.
-- **Expiração das credenciais:** o `browser.json` deixa de funcionar se você fizer logout daquela sessão ou após cerca de 2 anos. O `ytmusicapi` 1.12.3 marca a autenticação por navegador como *deprecated* na ajuda do comando `ytmusicapi browser` (a documentação oficial ainda a descreve normalmente); uma versão futura pode exigir migração para OAuth.
+- **Expiração das credenciais:** o `browser.json` deixa de funcionar se você fizer logout daquela sessão, se a sessão for reaberta no navegador (rotação de cookies) ou após cerca de 2 anos. O Google não documenta a duração desses cookies; se expirarem com frequência mesmo seguindo o passo a passo, a alternativa é migrar para OAuth do `ytmusicapi`, que exige um projeto no Google Cloud. O `ytmusicapi` 1.12.3 marca a autenticação por navegador como *deprecated* na ajuda do comando `ytmusicapi browser` (a documentação oficial ainda a descreve normalmente); uma versão futura pode exigir migração para OAuth.
 - **Limites do Last.fm:** scrobbles antigos demais (na prática, por volta de 14 dias), no futuro, acima do limite diário ou filtrados pelo Last.fm são ignorados (códigos 1 a 5) e aparecem no log.
 - **Contas de marca (Brand Accounts):** não suportadas; o histórico lido é o da conta principal da sessão.
 - **Duplicações residuais possíveis:** (a) falha de rede depois que o Last.fm já aceitou um lote, seguida de retentativa; (b) interrupção entre a resposta do Last.fm e a gravação do estado; (c) estado reinicializado no mesmo dia de uma sincronização; (d) envios reais simultâneos pelo computador local e pelo Actions. *Exactly-once* não é possível sem identificadores por reprodução.
@@ -422,7 +425,8 @@ Se o estado for perdido (sem execuções por mais de 30 dias ou artifacts apagad
 | `Last.fm recusou as credenciais (código 10 ou 13 ...)` | API key ou secret incorretos | Confira em <https://www.last.fm/api/accounts> |
 | `BROWSER_JSON não contém o cookie __Secure-3PAPISID ...` | Headers copiados de uma requisição errada ou sem login | Gere o `browser.json` de novo a partir de uma requisição `browse` logada |
 | `BROWSER_JSON deve conter o JSON ... ou o caminho de um arquivo existente` | Caminho errado no `.env` ou secret com conteúdo incompleto | Use o caminho correto localmente; no GitHub, cole o JSON inteiro |
-| `YouTube Music recusou a autenticação` ou `Resposta inesperada do YouTube Music` | Cookies expirados, logout ou mudança no YouTube Music | Gere um novo `browser.json`; se persistir, atualize o `ytmusicapi` |
+| `YouTube Music não reconheceu a sessão do browser.json` | Cookies rotacionados (sessão reaberta no navegador ou janela deixada aberta após exportar), logout ou expiração | Gere um novo `browser.json` seguindo exatamente [Gerar o `browser.json`](#gerar-o-browserjson) e atualize o secret |
+| `Resposta inesperada do YouTube Music` | Sessão inválida ou mudança na estrutura do YouTube Music | Gere um novo `browser.json`; se persistir, atualize o `ytmusicapi` |
 | `CERTIFICATE_VERIFY_FAILED` local | Inspeção HTTPS por antivírus/proxy | O projeto já usa `truststore`; confirme que o certificado do antivírus/proxy está instalado no Windows |
 | `0 músicas encontradas no histórico` | Histórico pausado ou conta diferente | Verifique o histórico em <https://music.youtube.com/history> com a mesma conta |
 | Workflow não executa de hora em hora | Agendamento desativado, Actions desabilitado ou atraso do GitHub | Veja [Verificar se o agendamento está habilitado](#verificar-se-o-agendamento-está-habilitado); atrasos são recuperados na execução seguinte |
