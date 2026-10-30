@@ -61,10 +61,11 @@ def fetch_history(auth: dict[str, Any], now: datetime) -> list[Any]:
     except YTMusicUserError as error:
         raise YouTubeMusicAuthError(f"Autenticação do YouTube Music inválida: {error}") from error
     except YTMusicServerError as error:
-        if "HTTP 401" in str(error) or "HTTP 403" in str(error):
+        if str(error) == "None" or "HTTP 401" in str(error) or "HTTP 403" in str(error):
             raise YouTubeMusicAuthError(
-                "YouTube Music recusou a autenticação; os cookies expiraram ou foram revogados. "
-                "Gere um novo browser.json."
+                "YouTube Music não reconheceu a sessão do browser.json (respondeu como usuário "
+                "deslogado); os cookies expiraram, foram rotacionados ou revogados. "
+                "Gere um novo browser.json seguindo o README."
             ) from error
         raise YouTubeMusicError(f"YouTube Music retornou erro: {error}") from error
     except requests.RequestException as error:

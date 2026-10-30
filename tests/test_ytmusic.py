@@ -97,6 +97,7 @@ def test_fetches_history_in_sao_paulo_timezone(monkeypatch):
     ("outcome", "expected"),
     [
         (YTMusicServerError("Server returned HTTP 401: Unauthorized.\n"), YouTubeMusicAuthError),
+        (YTMusicServerError(None), YouTubeMusicAuthError),
         (YTMusicUserError("Your cookie is missing __Secure-3PAPISID"), YouTubeMusicAuthError),
         (YTMusicServerError("Server returned HTTP 503: Unavailable.\n"), YouTubeMusicError),
         (requests.ConnectionError("down"), YouTubeMusicError),
